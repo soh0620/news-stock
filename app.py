@@ -3,7 +3,7 @@ HR-Tech 株価・ニュース 比較ダッシュボード
 対象: プラスアルファ・コンサルティング / カオナビ / SmartHR / HRブレイン
 
 依存: pip install -r requirements.txt
-起動: streamlit run app.py
+起動: streamlit run app.py --browser.gatherUsageStats false
 """
 
 import streamlit as st
@@ -85,7 +85,7 @@ COMPANIES = [
 # ページ設定
 # ======================================================================
 st.set_page_config(
-    page_title="4社の株価＆ニュース",
+    page_title="HR-Tech 比較ダッシュボード",
     page_icon="📊",
     layout="wide",
 )
@@ -143,6 +143,13 @@ def _style_axes(fig: go.Figure):
         linecolor="#ccc", linewidth=1, showline=True,
     )
     return fig
+
+
+def _ja_date_format(period_label: str) -> str:
+    """表示期間に応じた日本語日付フォーマット（D3 tickformat）を返す"""
+    if period_label in ("1週間", "1ヶ月"):
+        return "%m月%d日"
+    return "%Y年%m月"
 
 
 # ======================================================================
@@ -308,6 +315,7 @@ def make_stock_chart(hist: pd.DataFrame, comp: dict, period_label: str) -> go.Fi
     ))
     fig.update_xaxes(showspikes=True, spikemode="across", spikethickness=1)
     _style_axes(fig)
+    fig.update_xaxes(tickformat=_ja_date_format(period_label))
     return fig
 
 
@@ -337,6 +345,7 @@ def make_line_chart(hist: pd.DataFrame, comp: dict, period_label: str) -> go.Fig
         hovermode="x unified",
     ))
     _style_axes(fig)
+    fig.update_xaxes(tickformat=_ja_date_format(period_label))
     return fig
 
 
@@ -355,113 +364,7 @@ def make_volume_chart(hist: pd.DataFrame, comp: dict, period_label: str) -> go.F
         margin=dict(l=70, r=30, t=70, b=50),
     ))
     _style_axes(fig)
-    return fig
-
-
-# ---------- 比較チャート ----------
-
-def make_normalized_chart(stocks: dict, period_label: str) -> go.Figure:
-    """上場企業のみ：正規化株価推移（起点 = 100）"""
-    fig = go.Figure()
-    has_data = False
-    for comp in COMPANIES:
-        name = comp["name"]
-        if name not in stocks or stocks[name][0].empty:
-            continue
-        hist = stocks[name][0]
-        norm = hist["Close"] / hist["Close"].iloc[0] * 100
-        has_data = True
-        fig.add_trace(go.Scatter(
-            x=hist.index, y=norm,
-            name=comp["short"],
-            line=dict(color=comp["color"], width=2.5),
-            hovertemplate=(
-                f"<b>{comp['short']}</b><br>"
-                "%{x|%Y-%m-%d}<br>相対値: %{y:.1f}<extra></extra>"
-            ),
-        ))
-
-    if not has_data:
-        fig.add_annotation(
-            text="株価データなし（上場企業のみ対象）",
-            xref="paper", yref="paper", x=0.5, y=0.5,
-            showarrow=False, font=dict(size=16, color="gray"),
-        )
-    else:
-        fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.4,
-                      annotation_text="起点 (100)", annotation_position="left")
-
-    fig.update_layout(**_common_layout(
-        title=f"株価推移比較（正規化・起点=100）（{period_label}）",
-        height=480, xaxis_title="日付", yaxis_title="相対株価（起点=100）",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1, font=_LEGEND_FONT,
-                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#ddd", borderwidth=1),
-        margin=dict(l=70, r=30, t=90, b=50),
-    ))
-    _style_axes(fig)
-    return fig
-
-
-def make_return_bar(stocks: dict, period_label: str) -> go.Figure:
-    """期間騰落率の横棒グラフ"""
-    names, returns, colors = [], [], []
-    for comp in COMPANIES:
-        name = comp["name"]
-        if name not in stocks or stocks[name][0].empty:
-            continue
-        hist = stocks[name][0]
-        ret = (hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100
-        names.append(comp["short"])
-        returns.append(round(ret, 2))
-        colors.append("#e74c3c" if ret >= 0 else "#3498db")
-
-    if not names:
-        fig = go.Figure()
-        fig.add_annotation(text="データなし", xref="paper", yref="paper",
-                           x=0.5, y=0.5, showarrow=False,
-                           font=dict(size=16, color="gray"))
-    else:
-        fig = go.Figure(go.Bar(
-            x=returns, y=names, orientation="h",
-            marker_color=colors,
-            text=[f"{r:+.2f}%" for r in returns],
-            textposition="outside",
-            textfont=dict(size=13, color="#2c3e50"),
-            hovertemplate="%{y}: %{x:+.2f}%<extra></extra>",
-        ))
-        fig.add_vline(x=0, line_color="gray", line_width=1, opacity=0.5)
-
-    fig.update_layout(**_common_layout(
-        title=f"期間騰落率（{period_label}）",
-        height=max(280, len(names) * 80 + 120),
-        xaxis_title="騰落率（%）",
-        margin=dict(l=120, r=100, t=70, b=50),
-    ))
-    _style_axes(fig)
-    return fig
-
-
-def make_news_count_bar(news_counts: dict) -> go.Figure:
-    """Google News ヒット件数比較"""
-    names  = [c["short"] for c in COMPANIES]
-    counts = [news_counts.get(c["name"], 0) for c in COMPANIES]
-    colors = [c["color"] for c in COMPANIES]
-
-    fig = go.Figure(go.Bar(
-        x=names, y=counts,
-        marker_color=colors, opacity=0.85,
-        text=counts, textposition="outside",
-        textfont=dict(size=13, color="#2c3e50"),
-        hovertemplate="%{x}<br>ニュース件数: %{y}件<extra></extra>",
-    ))
-    fig.update_layout(**_common_layout(
-        title="Google News ヒット件数比較（直近取得分）",
-        height=360, yaxis_title="件数",
-        margin=dict(l=60, r=30, t=70, b=50),
-    ))
-    _style_axes(fig)
+    fig.update_xaxes(tickformat=_ja_date_format(period_label))
     return fig
 
 
@@ -690,13 +593,6 @@ def main():
                 hist, info = fetch_stock(comp["ticker"], period)
                 stocks[comp["name"]] = (hist, info)
 
-    # ── ニュース取得（件数比較用）─────────────────────────────────────────
-    news_counts: dict = {}
-    with st.spinner("ニュース件数を集計中..."):
-        for comp in COMPANIES:
-            items = fetch_google_news(comp["news_q"])
-            news_counts[comp["name"]] = len(items)
-
     # ── タブ ────────────────────────────────────────────────────────────
     tab_labels = ["📊 4社比較"] + [
         ("📈 " if c["ticker"] else "📰 ") + c["short"]
@@ -721,33 +617,6 @@ def main():
         st.caption(
             "※ カオナビは上場廃止のためデータなし。"
             "SmartHR・HRブレインは非上場のためデータなし。"
-        )
-
-        st.divider()
-
-        # ③ 株価推移比較チャート（上場企業のみ）＋ 期間騰落率
-        col_chart, col_bar = st.columns([3, 2])
-        with col_chart:
-            st.markdown("### 株価推移比較（上場企業のみ）")
-            st.plotly_chart(
-                make_normalized_chart(stocks, period_label),
-                use_container_width=True,
-            )
-        with col_bar:
-            st.markdown("### 期間騰落率")
-            st.plotly_chart(
-                make_return_bar(stocks, period_label),
-                use_container_width=True,
-            )
-
-        st.divider()
-
-        # ④ Google News 件数比較
-        st.markdown("### Google News ヒット件数比較（4社）")
-        st.plotly_chart(make_news_count_bar(news_counts), use_container_width=True)
-        st.caption(
-            "Google News RSS で取得した直近ニュース件数です。"
-            "検索クエリの広さにより変動します。"
         )
 
     # ════════════════════════════════════════════
